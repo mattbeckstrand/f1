@@ -1,38 +1,75 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
-import { DRIVERS } from "@/lib/drivers";
-import { calculateScore } from "@/lib/scoring";
+import { useRouter } from "next/navigation";
+import { getSession, setSession } from "@/lib/session";
 
 export default function Home() {
-  const [state, setState] = useState(null);
+  const router = useRouter();
+  const [mode, setMode] = useState(null); // null | "create" | "join"
+  const [groupName, setGroupName] = useState("");
+  const [playerName, setPlayerName] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [session, setSessionState] = useState(null);
 
   useEffect(() => {
-    const load = () => fetch("/api/state").then(r => r.json()).then(setState);
-    load();
-    const id = setInterval(load, 8000);
-    return () => clearInterval(id);
+    const s = getSession();
+    if (s) setSessionState(s);
   }, []);
 
-  if (!state) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="animate-pulse text-xl text-gray-500">Loading...</div>
-      </div>
-    );
+  async function handleCreate() {
+    if (!groupName.trim() || !playerName.trim()) {
+      setError("Fill in all fields");
+      return;
+    }
+    setLoading(true);
+    setError("");
+
+    const res = await fetch("/api/groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupName: groupName.trim(), playerName: playerName.trim() }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error || "Something went wrong");
+      setLoading(false);
+      return;
+    }
+
+    const { id } = await res.json();
+    setSession(id, playerName.trim(), true);
+    router.push(`/group/${id}`);
   }
 
-  const hasResults = state.results && Object.keys(state.results).length > 0;
-  const entries = Object.entries(state.players || {});
+  async function handleJoin() {
+    if (!joinCode.trim() || !playerName.trim()) {
+      setError("Fill in all fields");
+      return;
+    }
+    setLoading(true);
+    setError("");
 
-  const leaderboard = entries
-    .map(([name, picks]) => ({
-      name,
-      picks,
-      score: calculateScore(picks, state.results),
-    }))
-    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    const res = await fetch("/api/groups/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: joinCode.trim().toUpperCase(), playerName: playerName.trim() }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error || "Something went wrong");
+      setLoading(false);
+      return;
+    }
+
+    const { id } = await res.json();
+    setSession(id, playerName.trim(), false);
+    router.push(`/group/${id}`);
+  }
 
   return (
     <div className="space-y-6 pt-8">
@@ -44,123 +81,116 @@ export default function Home() {
         <h1 className="text-5xl font-black tracking-tight mt-1 bg-gradient-to-r from-red-500 to-orange-400 bg-clip-text text-transparent">
           FANTASY F1
         </h1>
-        <p className="text-gray-400 mt-2 text-lg">{state.raceName}</p>
+        <p className="text-gray-400 mt-2 text-lg">Draft League 2026</p>
       </div>
 
-      {/* Status */}
-      <div className="grid grid-cols-2 gap-3">
-        <div
-          className={`rounded-xl p-4 text-center border ${
-            state.locked
-              ? "bg-red-500/10 border-red-500/30"
-              : "bg-emerald-500/10 border-emerald-500/30"
-          }`}
+      {/* Return to group */}
+      {session && (
+        <button
+          onClick={() => router.push(`/group/${session.groupId}`)}
+          className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 text-left hover:bg-white/[0.06] transition-colors"
         >
-          <p className="text-[10px] text-gray-400 uppercase tracking-widest">Picks</p>
-          <p className={`text-lg font-extrabold ${state.locked ? "text-red-400" : "text-emerald-400"}`}>
-            {state.locked ? "LOCKED" : "OPEN"}
+          <p className="text-xs text-gray-500 uppercase tracking-wider">Return to your group</p>
+          <p className="text-white font-semibold mt-1">
+            Playing as <span className="text-red-400">{session.playerName}</span>
           </p>
-        </div>
-        <div
-          className={`rounded-xl p-4 text-center border ${
-            hasResults
-              ? "bg-emerald-500/10 border-emerald-500/30"
-              : "bg-amber-500/10 border-amber-500/30"
-          }`}
-        >
-          <p className="text-[10px] text-gray-400 uppercase tracking-widest">Results</p>
-          <p className={`text-lg font-extrabold ${hasResults ? "text-emerald-400" : "text-amber-400"}`}>
-            {hasResults ? "FINAL" : "PENDING"}
-          </p>
-        </div>
-      </div>
+        </button>
+      )}
 
-      {/* CTA */}
-      {!state.locked && (
-        <Link href="/pick" className="block">
-          <div className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold py-5 rounded-xl text-center text-xl transition-all shadow-lg shadow-red-500/20">
-            Make Your Picks
+      {/* Mode selection */}
+      {!mode && (
+        <div className="space-y-3">
+          <button
+            onClick={() => setMode("create")}
+            className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold py-5 rounded-xl text-center text-xl transition-all shadow-lg shadow-red-500/20"
+          >
+            Create a League
+          </button>
+          <button
+            onClick={() => setMode("join")}
+            className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold py-5 rounded-xl text-center text-xl transition-all"
+          >
+            Join a League
+          </button>
+        </div>
+      )}
+
+      {/* Create form */}
+      {mode === "create" && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold">Create a League</h2>
+          <div>
+            <label className="text-xs text-gray-400 uppercase tracking-wider block mb-2">League Name</label>
+            <input
+              type="text"
+              value={groupName}
+              onChange={e => { setGroupName(e.target.value); setError(""); }}
+              placeholder="e.g. Beckstrand F1"
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50"
+            />
           </div>
-        </Link>
-      )}
-
-      {state.locked && !hasResults && (
-        <div className="text-center py-4 text-gray-400">
-          Picks are locked. Waiting for race results...
-        </div>
-      )}
-
-      {/* Leaderboard */}
-      {entries.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
-              {hasResults ? "Leaderboard" : `${entries.length} Player${entries.length !== 1 ? "s" : ""}`}
-            </h2>
-            <Link href="/leaderboard" className="text-red-400 text-sm hover:text-red-300">
-              Details →
-            </Link>
+          <div>
+            <label className="text-xs text-gray-400 uppercase tracking-wider block mb-2">Your Name</label>
+            <input
+              type="text"
+              value={playerName}
+              onChange={e => { setPlayerName(e.target.value); setError(""); }}
+              placeholder="Enter your name..."
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50"
+            />
           </div>
-          <div className="space-y-2">
-            {leaderboard.map((p, i) => {
-              const driver = id => DRIVERS.find(d => d.id === id);
-              return (
-                <div
-                  key={p.name}
-                  className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    {hasResults && (
-                      <span
-                        className={`text-xs font-bold px-2 py-1 rounded ${
-                          i === 0
-                            ? "bg-yellow-500/20 text-yellow-400"
-                            : i === 1
-                            ? "bg-gray-400/20 text-gray-300"
-                            : i === 2
-                            ? "bg-orange-500/20 text-orange-400"
-                            : "text-gray-500"
-                        }`}
-                      >
-                        P{i + 1}
-                      </span>
-                    )}
-                    <div>
-                      <p className="font-semibold">{p.name}</p>
-                      <p className="text-xs text-gray-500">
-                        {p.picks.map(id => driver(id)?.name.split(" ").pop()).join(", ")}
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-2xl font-black tabular-nums">
-                    {p.score !== null ? (
-                      <>
-                        {p.score}
-                        <span className="text-xs text-gray-500 ml-1 font-medium">pts</span>
-                      </>
-                    ) : (
-                      <span className="text-gray-700">—</span>
-                    )}
-                  </span>
-                </div>
-              );
-            })}
+          {error && <p className="text-red-400 text-sm text-center font-medium">{error}</p>}
+          <button
+            onClick={handleCreate}
+            disabled={loading}
+            className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold py-4 rounded-xl text-lg transition-all shadow-lg shadow-red-500/20 disabled:opacity-50"
+          >
+            {loading ? "Creating..." : "Create League"}
+          </button>
+          <button onClick={() => { setMode(null); setError(""); }} className="w-full text-center text-sm text-gray-500 hover:text-white transition-colors">
+            ← Back
+          </button>
+        </div>
+      )}
+
+      {/* Join form */}
+      {mode === "join" && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold">Join a League</h2>
+          <div>
+            <label className="text-xs text-gray-400 uppercase tracking-wider block mb-2">Join Code</label>
+            <input
+              type="text"
+              value={joinCode}
+              onChange={e => { setJoinCode(e.target.value.toUpperCase()); setError(""); }}
+              placeholder="Enter 6-letter code..."
+              maxLength={6}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50 uppercase tracking-[0.3em] text-center text-2xl font-mono"
+            />
           </div>
+          <div>
+            <label className="text-xs text-gray-400 uppercase tracking-wider block mb-2">Your Name</label>
+            <input
+              type="text"
+              value={playerName}
+              onChange={e => { setPlayerName(e.target.value); setError(""); }}
+              placeholder="Enter your name..."
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50"
+            />
+          </div>
+          {error && <p className="text-red-400 text-sm text-center font-medium">{error}</p>}
+          <button
+            onClick={handleJoin}
+            disabled={loading}
+            className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold py-4 rounded-xl text-lg transition-all shadow-lg shadow-red-500/20 disabled:opacity-50"
+          >
+            {loading ? "Joining..." : "Join League"}
+          </button>
+          <button onClick={() => { setMode(null); setError(""); }} className="w-full text-center text-sm text-gray-500 hover:text-white transition-colors">
+            ← Back
+          </button>
         </div>
       )}
-
-      {entries.length === 0 && (
-        <div className="text-center py-8 text-gray-600">
-          No picks yet. Be the first!
-        </div>
-      )}
-
-      {/* Nav */}
-      <nav className="flex justify-center gap-6 pt-6 text-sm text-gray-500">
-        <Link href="/pick" className="hover:text-white transition-colors">Picks</Link>
-        <Link href="/leaderboard" className="hover:text-white transition-colors">Leaderboard</Link>
-        <Link href="/admin" className="hover:text-white transition-colors">Admin</Link>
-      </nav>
     </div>
   );
 }
