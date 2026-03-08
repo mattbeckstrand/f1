@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { getState, saveState } from "@/lib/store";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
-  return NextResponse.json(getState());
+  const state = await getState();
+  return NextResponse.json(state);
 }
 
 export async function POST(request) {
   const body = await request.json();
-  const state = getState();
+  const state = await getState();
 
   switch (body.action) {
     case "addPlayer": {
@@ -18,37 +21,37 @@ export async function POST(request) {
         return NextResponse.json({ error: "Need a name and 5 picks" }, { status: 400 });
       }
       state.players[body.name.trim()] = body.picks;
-      saveState(state);
+      await saveState(state);
       return NextResponse.json({ ok: true });
     }
 
     case "removePlayer": {
       delete state.players[body.name];
-      saveState(state);
+      await saveState(state);
       return NextResponse.json({ ok: true });
     }
 
     case "setResults": {
       state.results = body.results || {};
-      saveState(state);
+      await saveState(state);
       return NextResponse.json({ ok: true });
     }
 
     case "toggleLock": {
       state.locked = !state.locked;
-      saveState(state);
+      await saveState(state);
       return NextResponse.json({ ok: true, locked: state.locked });
     }
 
     case "setRaceName": {
       state.raceName = body.raceName || "";
-      saveState(state);
+      await saveState(state);
       return NextResponse.json({ ok: true });
     }
 
     case "reset": {
       const fresh = { players: {}, results: {}, locked: false, raceName: state.raceName };
-      saveState(fresh);
+      await saveState(fresh);
       return NextResponse.json({ ok: true });
     }
 
